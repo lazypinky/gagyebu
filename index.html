@@ -1,3 +1,11 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personal Finance Tracker</title>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.24.0/tabler-icons.min.css">
 
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -54,8 +62,15 @@ input,select,textarea{width:100%;font-family:var(--font-sans);font-size:13px}
 .empty{text-align:center;padding:2rem;color:var(--color-text-secondary);font-size:13px}
 .trend-chip{display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:2px 7px;border-radius:20px}
 </style>
+</head>
+<body>
 
 <h2 class="sr-only">Finance tracker v2 — multi-account, CSV import, balance reconciliation, insights, and auto-detected recurring bills</h2>
+
+<header class="app-header">
+  <h1>Personal Finance Tracker</h1>
+  <p>Manage accounts, import CSV transactions, reconcile balances, review spending trends, and detect recurring bills. Data is stored locally in this browser.</p>
+</header>
 
 <div style="padding:1.25rem 0">
 <div class="tab-bar">
@@ -187,8 +202,19 @@ input,select,textarea{width:100%;font-family:var(--font-sans);font-size:13px}
     <div style="display:flex;gap:8px"><input type="text" id="new-cat" placeholder="New category" style="flex:1"><button class="btn-primary" onclick="addCategory()">Add</button></div>
   </div>
   <div class="card">
-    <div class="card-title">Export data</div>
-    <button class="btn-outline" onclick="exportData()"><i class="ti ti-download" aria-hidden="true"></i> Export JSON</button>
+    <div class="card-title">Backup / Restore</div>
+    <div style="font-size:12px;color:var(--color-text-secondary);line-height:1.45;margin-bottom:10px">
+      Your data is auto-saved in this browser whenever you add/import/edit items. For a safer backup, export a JSON file and keep it in OneDrive/Google Drive/external storage.
+    </div>
+    <div id="backup-status" style="font-size:12px;color:var(--color-text-secondary);margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn-outline" onclick="exportData()"><i class="ti ti-download" aria-hidden="true"></i> Export Backup JSON</button>
+      <button class="btn-outline" onclick="document.getElementById('restore-file').click()"><i class="ti ti-upload" aria-hidden="true"></i> Import Backup JSON</button>
+      <input type="file" id="restore-file" accept=".json,application/json" style="display:none" onchange="importBackup(this)">
+    </div>
+    <div style="font-size:11px;color:var(--color-text-secondary);line-height:1.4;margin-top:10px">
+      Note: Browsers do not allow a website to silently read your local backup file on startup. To use the newest backup after a computer reset or on another browser/device, upload the exported JSON here.
+    </div>
   </div>
 </div>
 </div>
@@ -203,7 +229,21 @@ let state = {
   reconcileAcct: null
 };
 try { const s = localStorage.getItem('financeV2'); if(s) state = {...state,...JSON.parse(s)}; } catch(e){}
-function save(){ try{ localStorage.setItem('financeV2', JSON.stringify(state)); }catch(e){} }
+function save(){
+  try{
+    state.lastSaved = new Date().toISOString();
+    localStorage.setItem('financeV2', JSON.stringify(state));
+    updateBackupStatus();
+  }catch(e){
+    console.error('Could not save data', e);
+  }
+}
+function updateBackupStatus(){
+  const el=document.getElementById('backup-status');
+  if(!el) return;
+  const saved=state.lastSaved ? new Date(state.lastSaved).toLocaleString() : 'Not saved yet';
+  el.textContent = `Last auto-saved in this browser: ${saved}`;
+}
 function fmt(n){ return '$'+Math.abs(+n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 const COLORS=['#3266ad','#1D9E75','#D85A30','#885AB1','#BA7517','#D4537E','#639922','#185FA5','#993C1D','#0F6E56','#888','#5DCAA5'];
 function catColor(cat){ return COLORS[state.categories.indexOf(cat)%COLORS.length]||'#888'; }
@@ -630,11 +670,51 @@ function renderSettings(){
 }
 function addCategory(){ const v=document.getElementById('new-cat').value.trim(); if(!v||state.categories.includes(v)) return; state.categories.push(v); save(); renderSettings(); document.getElementById('new-cat').value=''; }
 function deleteCategory(c){ state.categories=state.categories.filter(x=>x!==c); save(); renderSettings(); }
-function exportData(){ const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='finance-data.json'; a.click(); }
+function exportData(){
+  const backup={...state, exportedAt:new Date().toISOString(), app:'Personal Finance Tracker'};
+  const b=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  const stamp=new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+  a.download=`finance-backup-${stamp}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importBackup(input){
+  const file=input.files && input.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(!Array.isArray(data.transactions) || !Array.isArray(data.accounts) || !Array.isArray(data.categories)){
+        alert('This does not look like a valid finance backup JSON file.');
+        return;
+      }
+      const msg=`Import backup from ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : 'unknown date'}?\n\nThis will replace the data currently saved in this browser.`;
+      if(!confirm(msg)) return;
+      state={...state,...data};
+      delete state.exportedAt;
+      save();
+      populateCatSelect('tx-cat');
+      populateAccountSelects();
+      renderDashboard();
+      alert('Backup imported successfully.');
+      input.value='';
+    }catch(err){
+      alert('Could not import this backup file. Please check that it is a valid JSON export from this app.');
+    }
+  };
+  reader.readAsText(file);
+}
 
 // ---- INIT ----
 document.getElementById('tx-date').value=new Date().toISOString().slice(0,10);
 populateCatSelect('tx-cat');
 populateAccountSelects();
 renderDashboard();
+updateBackupStatus();
 </script>
+
+</body>
+</html>
