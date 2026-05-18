@@ -87,7 +87,6 @@
             <div class="card-title">Search and filter</div>
             <div class="toolbar">
               <input type="search" id="tx-search" placeholder="Search description, notes...">
-              <select id="tx-filter-acct"></select>
               <select id="tx-filter-cat"></select>
               <input type="month" id="tx-filter-month">
               <button class="btn" onclick="applyTxFilters()"><i class="ti ti-search"></i>Search</button>
@@ -194,7 +193,6 @@ function totalBalance(){ return state.accounts.reduce((s,a)=>s+calcAcctBalance(a
 function populateAccountSelects(){
   const opts = state.accounts.length? state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('') : '<option value="">No accounts</option>';
   ['tx-acct','import-acct','edit-acct'].forEach(id=>{ const el=document.getElementById(id); if(el) el.innerHTML=opts; });
-  const filter=document.getElementById('tx-filter-acct'); if(filter) filter.innerHTML='<option value="">All accounts</option>'+state.accounts.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
 }
 function populateCatSelect(id,withAll=false){ const el=document.getElementById(id); if(!el) return; el.innerHTML=(withAll?'<option value="">All categories</option>':'')+state.categories.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join(''); }
 
@@ -227,7 +225,22 @@ function setType(t){ state.txType=t; document.getElementById('btn-income').class
 function addTransaction(){ const desc=document.getElementById('tx-desc').value.trim(); const amount=parseFloat(document.getElementById('tx-amount').value); const date=document.getElementById('tx-date').value; const cat=document.getElementById('tx-cat').value; const acctId=parseInt(document.getElementById('tx-acct').value)||null; const notes=document.getElementById('tx-notes').value.trim(); if(!desc||isNaN(amount)||amount<=0||!date) return alert('Fill in description, amount, and date'); state.transactions.unshift({id:Date.now(),desc,amount,date,cat,type:state.txType,acctId,notes,source:'manual'}); save(); ['tx-desc','tx-amount','tx-notes'].forEach(id=>document.getElementById(id).value=''); renderTransactions(); }
 function applyTxFilters(){ renderTransactions(); }
 function txRowHTML(t,editable=true){ const acct=getAcct(t.acctId); return `<div class="tx-row"><div class="tx-main"><span class="tx-sign ${t.type}">${t.type==='income'?'+':'−'}</span><div style="min-width:0"><div class="tx-desc">${esc(t.desc)}</div><div class="muted" style="font-size:12px">${esc(t.date)}${t.notes?' · '+esc(t.notes):''}</div></div></div><span class="tag">${esc(t.cat||'—')}</span><span class="muted">${esc(acct?.name||'—')}</span><b class="${t.type==='income'?'positive':'negative'}">${t.type==='income'?'+':'-'}${fmt(t.amount)}</b>${editable?`<button class="small-btn" onclick="openEditTx(${t.id})"><i class="ti ti-pencil"></i></button>`:''}</div>`; }
-function renderTransactions(){ populateAccountSelects(); populateCatSelect('tx-cat'); populateCatSelect('edit-cat'); const fAcct=document.getElementById('tx-filter-acct'); const fCat=document.getElementById('tx-filter-cat'); if(fCat) populateCatSelect('tx-filter-cat',true); let tx=[...state.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date)); const q=(document.getElementById('tx-search')?.value||'').toLowerCase().trim(); const acct=fAcct?.value||''; const cat=fCat?.value||''; const mon=document.getElementById('tx-filter-month')?.value||''; if(q) tx=tx.filter(t=>(t.desc+' '+(t.notes||'')).toLowerCase().includes(q)); if(acct) tx=tx.filter(t=>String(t.acctId)===acct); if(cat) tx=tx.filter(t=>t.cat===cat); if(mon) tx=tx.filter(t=>monthKey(t.date)===mon); document.getElementById('tx-list-full').innerHTML=tx.length?tx.map(t=>txRowHTML(t,true)).join(''):'<div class="empty">No matching transactions</div>'; }
+function renderTransactions(){
+  populateAccountSelects();
+  populateCatSelect('tx-cat');
+  populateCatSelect('edit-cat');
+  const fCat=document.getElementById('tx-filter-cat');
+  const selectedCat=fCat?.value||'';
+  if(fCat){ populateCatSelect('tx-filter-cat',true); fCat.value=selectedCat; }
+  let tx=[...state.transactions].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const q=(document.getElementById('tx-search')?.value||'').toLowerCase().trim();
+  const cat=document.getElementById('tx-filter-cat')?.value||'';
+  const mon=document.getElementById('tx-filter-month')?.value||'';
+  if(q) tx=tx.filter(t=>(t.desc+' '+(t.notes||'')).toLowerCase().includes(q));
+  if(cat) tx=tx.filter(t=>t.cat===cat);
+  if(mon) tx=tx.filter(t=>monthKey(t.date)===mon);
+  document.getElementById('tx-list-full').innerHTML=tx.length?tx.map(t=>txRowHTML(t,true)).join(''):'<div class="empty">No matching transactions</div>';
+}
 let editingTxId=null;
 function openEditTx(id){ editingTxId=id; const t=state.transactions.find(x=>x.id==id); if(!t) return; populateAccountSelects(); populateCatSelect('edit-cat'); document.getElementById('edit-desc').value=t.desc||''; document.getElementById('edit-amount').value=t.amount||0; document.getElementById('edit-date').value=t.date||''; document.getElementById('edit-type').value=t.type||'expense'; document.getElementById('edit-acct').value=t.acctId||''; document.getElementById('edit-cat').value=t.cat||state.categories[0]||''; document.getElementById('edit-notes').value=t.notes||''; document.getElementById('edit-modal').classList.add('show'); }
 function closeEditModal(){ editingTxId=null; document.getElementById('edit-modal').classList.remove('show'); }
