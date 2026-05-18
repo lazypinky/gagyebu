@@ -212,7 +212,7 @@ function renderDashboard(){
   const labels=Object.keys(catTotals).sort((a,b)=>catTotals[b]-catTotals[a]); const data=labels.map(l=>catTotals[l]);
   if(dashCatChart) dashCatChart.destroy();
   const ctx=document.getElementById('dashCatChart');
-  dashCatChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Spending',data,backgroundColor:labels.map((_,i)=>catColor(i)),borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.parsed.y)}}},scales:{x:{grid:{display:false},ticks:{color:'#7b7468'}},y:{grid:{color:'rgba(126,116,104,.13)'},ticks:{callback:v=>'$'+v.toLocaleString(),color:'#7b7468'}}}});
+  dashCatChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Spending',data,backgroundColor:labels.map((_,i)=>catColor(i)),borderRadius:8}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.parsed.y)}}},scales:{x:{grid:{display:false},ticks:{color:'#7b7468'}},y:{grid:{color:'rgba(126,116,104,.13)'},ticks:{callback:v=>'$'+v.toLocaleString(),color:'#7b7468'}}}}});
 }
 
 function addAccount(){ const name=document.getElementById('acct-name').value.trim(); if(!name) return alert('Enter account name'); const type=document.getElementById('acct-type').value; const balance=parseFloat(document.getElementById('acct-balance').value)||0; state.accounts.push({id:Date.now(),name,type,bankBalance:balance,showOnDashboard:state.accounts.filter(a=>a.showOnDashboard).length<3}); save(); document.getElementById('acct-name').value=''; document.getElementById('acct-balance').value=''; renderAccounts(); }
