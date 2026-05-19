@@ -406,7 +406,7 @@ const App = (() => {
     const expense = sumByType('Expense', filter);
     const net = income - saving - expense;
 
-    $('dash-month-label').textContent = `For ${month}`;
+    $('dash-month-label').textContent = '';
     $('dash-net-flow').textContent = money(net, true);
     $('dash-net-flow').className = 'big-number ' + (net >= 0 ? 'green' : 'red');
 
@@ -420,17 +420,17 @@ const App = (() => {
     }
     $('dash-type-amounts').innerHTML = [['Income', income, 'green'], ['Saving', saving, 'blue'], ['Expense', expense, 'red']].map(([label, value, cls]) => `<div class="metric"><div class="label">${label}</div><div class="value ${cls}">${money(value)}</div></div>`).join('');
 
-    const pinned = state.accounts.filter(a => a.pinned).slice(0, 3);
+    const pinned = state.accounts.filter(a => a.pinned);
     $('dash-accounts').innerHTML = pinned.length ? pinned.map(a => {
       const bal = calcAccountAsOf(a.id, monthEnd(month));
       return `<div class="pin-card"><div class="muted">${esc(a.type)} • as of ${esc(monthEnd(month))}</div><h3 style="margin:4px 0 8px">${esc(a.name)}</h3><b class="${bal >= 0 ? 'green' : 'red'}">${money(bal, true)}</b></div>`;
-    }).join('') : '<div class="empty">Pin up to 3 accounts from the Accounts tab.</div>';
+    }).join('') : '<div class="empty">Choose accounts to show from the Accounts tab.</div>';
 
     const selected = state.dashboardSubCats.map(findSubById).filter(Boolean);
     $('dash-cat-pins').innerHTML = selected.length ? selected.map(s => {
       const total = state.transactions.filter(t => t.type === s.type && t.subCat === s.name && inMonth(t, month)).reduce((sum, t) => sum + t.amount, 0);
       const cls = s.type === 'Expense' ? 'red' : s.type === 'Saving' ? 'blue' : 'green';
-      return `<div class="cat-card"><h3>${esc(s.main)} / ${esc(s.name)}</h3><b class="${cls}">${money(total)}</b><div class="muted">${esc(s.type)} • ${esc(month)}</div></div>`;
+      return `<div class="cat-card"><h3>${esc(s.main)} / ${esc(s.name)}</h3><b class="${cls}">${money(total)}</b><div class="muted">${esc(s.type)}</div></div>`;
     }).join('') : '<div class="empty">Select dashboard categories from the Budget tab.</div>';
 
     const byMain = {};
@@ -587,11 +587,6 @@ const App = (() => {
   function pinAccount(id, checked) {
     const a = state.accounts.find(a => String(a.id) === String(id));
     if (!a) return;
-    if (checked && !a.pinned && state.accounts.filter(x => x.pinned).length >= 3) {
-      alert('You can pin up to 3 accounts.');
-      renderAccounts();
-      return;
-    }
     a.pinned = checked;
     save(); renderAccounts();
   }
@@ -871,6 +866,7 @@ const App = (() => {
   function deleteOneTx(id) { if (!confirm('Delete this transaction?')) return; state.transactions = state.transactions.filter(t => String(t.id) !== String(id)); selectedTx.delete(id); save(); closeEdit(); renderTransactions(); }
 
   function exportTransactionsCSV() {
+    syncCurrentFormState();
     const rows = [['Date','Type','Account','Main Category','Sub Category','Description','Amount','Notes','Reviewed','Source'], ...state.transactions.map(t => [t.date, t.type, accountName(t.accountId), t.mainCat, t.subCat, t.desc, t.amount, t.notes, t.reviewed ? 'Y' : 'N', t.source])];
     downloadBlob(new Blob([rows.map(r => r.map(csvEsc).join(',')).join('\n')], { type: 'text/csv' }), 'finance-transactions.csv');
   }
@@ -957,7 +953,27 @@ const App = (() => {
 
   function renderSettings() {}
 
+  function syncCurrentFormState() {
+    // Make sure values currently typed into inputs are saved before backup/export.
+    document.querySelectorAll('[data-account-id][data-field]').forEach(el => {
+      const a = state.accounts.find(a => String(a.id) === String(el.dataset.accountId));
+      if (!a) return;
+      a[el.dataset.field] = el.dataset.field === 'bankBalance' ? Number(el.value) || 0 : el.value;
+    });
+    document.querySelectorAll('[data-budget-id]').forEach(el => {
+      state.budgets[`${state.dashboardMonth || currentMonth()}|${el.dataset.budgetId}`] = Number(el.value) || 0;
+    });
+    const plan = $('monthly-plan');
+    if (plan) state.monthlyPlans[state.dashboardMonth || currentMonth()] = plan.value;
+    const review = $('monthly-review');
+    if (review) state.monthlyReviews[`${state.reportStart}|${state.reportEnd}`] = review.value;
+    const recurringNotes = $('recurring-notes');
+    if (recurringNotes) state.recurringNotes = recurringNotes.value;
+    save();
+  }
+
   function exportData() {
+    syncCurrentFormState();
     downloadBlob(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }), 'finance-backup.json');
   }
 
