@@ -126,6 +126,9 @@ const App = (() => {
   const currentMonth = () => today().slice(0, 7);
   const currentYear = () => today().slice(0, 4);
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const slug = (value) => String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+  const stableGroupId = (type, name) => 'grp_' + slug(type) + '_' + slug(name);
+  const stableSubId = (type, main, sub) => 'sub_' + slug(type) + '_' + slug(main) + '_' + slug(sub);
   const clone = (obj) => (typeof structuredClone === 'function' ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)));
   const money = (n, signed = false) => {
     n = Number(n) || 0;
@@ -176,7 +179,7 @@ const App = (() => {
   }
 
   function group(type, name, subs) {
-    return { id: uid(), type, name, subs: subs.map(name => ({ id: uid(), name })) };
+    return { id: stableGroupId(type, name), type, name, subs: subs.map(subName => ({ id: stableSubId(type, name, subName), name: subName })) };
   }
 
   function loadState() {
@@ -206,12 +209,19 @@ const App = (() => {
     if (!s.annualYear) s.annualYear = currentYear();
     if (Array.isArray(s.categories)) s.categories.forEach(c => ensureSubCategory('Expense', c, c, s));
 
-    s.categoryGroups = s.categoryGroups.map(g => ({
-      id: g.id || uid(),
-      type: normType(g.type),
-      name: String(g.name || g.type || 'Category').trim(),
-      subs: Array.isArray(g.subs) ? g.subs.map(sub => ({ id: sub.id || uid(), name: String(sub.name || 'Other').trim() })) : []
-    })).filter(g => g.name);
+    s.categoryGroups = s.categoryGroups.map(g => {
+      const type = normType(g.type);
+      const name = String(g.name || g.type || 'Category').trim();
+      return {
+        id: g.id || stableGroupId(type, name),
+        type,
+        name,
+        subs: Array.isArray(g.subs) ? g.subs.map(sub => {
+          const subName = String(sub.name || 'Other').trim();
+          return { id: sub.id || stableSubId(type, name, subName), name: subName };
+        }) : []
+      };
+    }).filter(g => g.name);
 
     TYPES.forEach(type => {
       if (!s.categoryGroups.some(g => g.type === type)) s.categoryGroups.push(group(type, type, [type === 'Expense' ? 'Other' : type]));
@@ -239,7 +249,7 @@ const App = (() => {
     let subCat = String(t.subCat || t.cat || t.category || '').trim();
 
     if (!subCat) subCat = guessSubCategory(desc, type, s);
-    if (!mainCat) mainCat = findMainBySub(subCat, s) || (type === 'Expense' ? 'Other' : type);
+    if (!mainCat) mainCat = findMainBySub(subCat, s, type) || (type === 'Expense' ? 'Other' : type);
     ensureSubCategory(type, mainCat, subCat, s);
 
     return { id: String(t.id || uid()), type, accountId: accountId == null ? null : String(accountId), date, desc, amount, mainCat, subCat, notes: String(t.notes || ''), source: t.source || 'manual', reviewed: !!t.reviewed };
@@ -250,14 +260,15 @@ const App = (() => {
     main = String(main || type).trim();
     sub = String(sub || main).trim();
     let g = s.categoryGroups.find(x => x.type === type && x.name === main);
-    if (!g) { g = { id: uid(), type, name: main, subs: [] }; s.categoryGroups.push(g); }
+    if (!g) { g = { id: stableGroupId(type, main), type, name: main, subs: [] }; s.categoryGroups.push(g); }
     let subObj = g.subs.find(x => x.name === sub);
-    if (!subObj) { subObj = { id: uid(), name: sub }; g.subs.push(subObj); }
+    if (!subObj) { subObj = { id: stableSubId(type, main, sub), name: sub }; g.subs.push(subObj); }
     return subObj.id;
   }
 
-  function findMainBySub(sub, s = state) {
-    const g = s.categoryGroups.find(g => g.subs.some(x => x.name === sub));
+  function findMainBySub(sub, s = state, type = '') {
+    const wantedType = type ? normType(type) : '';
+    const g = s.categoryGroups.find(g => (!wantedType || g.type === wantedType) && g.subs.some(x => x.name === sub));
     return g ? g.name : '';
   }
 
@@ -505,6 +516,7 @@ const App = (() => {
     if (!g) return;
     const name = prompt('New main category name', g.name)?.trim();
     if (!name) return;
+    if (state.categoryGroups.some(x => x.type === g.type && x.id !== g.id && x.name.toLowerCase() === name.toLowerCase())) return alert('This main category already exists.');
     const old = g.name;
     g.name = name;
     state.transactions.forEach(t => { if (t.mainCat === old && t.type === g.type) t.mainCat = name; });
@@ -514,7 +526,10 @@ const App = (() => {
   function deleteMain(id) {
     const g = state.categoryGroups.find(g => g.id === id);
     if (!g || !confirm(`Delete main category "${g.name}"? Transactions will stay with existing text values.`)) return;
+    const subIds = new Set(g.subs.map(s => s.id));
     state.categoryGroups = state.categoryGroups.filter(x => x.id !== id);
+    state.dashboardSubCats = state.dashboardSubCats.filter(id => !subIds.has(id));
+    Object.keys(state.budgets).forEach(k => { if (subIds.has(k.split('|').pop())) delete state.budgets[k]; });
     save(); renderBudget();
   }
 
@@ -534,6 +549,7 @@ const App = (() => {
     const old = sub.name;
     const name = prompt('New sub category name', old)?.trim();
     if (!name) return;
+    if (g.subs.some(x => x.id !== sid && x.name.toLowerCase() === name.toLowerCase())) return alert('This sub category already exists.');
     sub.name = name;
     state.transactions.forEach(t => { if (t.subCat === old && t.mainCat === g.name && t.type === g.type) t.subCat = name; });
     save(); renderBudget();
@@ -669,8 +685,8 @@ const App = (() => {
     const catFilter = $('tx-filter-cat');
     if (catFilter) {
       const old = catFilter.value;
-      const subs = allSubs('Expense').map(s => s.name);
-      catFilter.innerHTML = '<option value="">All expense categories</option>' + subs.map(s => `<option value="${esc(s)}" ${s === old ? 'selected' : ''}>${esc(s)}</option>`).join('');
+      const cats = TYPES.flatMap(type => getGroups(type).flatMap(g => g.subs.map(sub => ({ value: `${type}|||${g.name}|||${sub.name}`, label: `${type}: ${g.name} / ${sub.name}` }))));
+      catFilter.innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option value="${esc(c.value)}" ${c.value === old ? 'selected' : ''}>${esc(c.label)}</option>`).join('');
     }
     const monthFilter = $('tx-filter-month');
     if (monthFilter) {
@@ -759,7 +775,7 @@ const App = (() => {
       else if (/income|credit|deposit|payroll/.test(typeText) || signedAmount > 0) type = 'Income';
       else if (/expense|debit|withdrawal|purchase/.test(typeText) || signedAmount < 0) type = 'Expense';
       const subCat = catIdx >= 0 && row[catIdx] ? String(row[catIdx]).trim() : guessSubCategory(desc, type);
-      const mainCat = findMainBySub(subCat) || (type === 'Expense' ? 'Other' : type);
+      const mainCat = findMainBySub(subCat, state, type) || (type === 'Expense' ? 'Other' : type);
       ensureSubCategory(type, mainCat, subCat);
       const duplicate = state.transactions.some(t => String(t.accountId) === String(accountId) && t.date === date && Math.abs(t.amount - amount) < .01 && t.desc === desc);
       if (duplicate) { skipped++; return; }
@@ -778,7 +794,10 @@ const App = (() => {
     const reviewedFilter = $('tx-filter-reviewed')?.value || '';
     let txs = [...state.transactions].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     if (q) txs = txs.filter(t => `${t.desc} ${t.notes} ${t.mainCat} ${t.subCat}`.toLowerCase().includes(q));
-    if (cat) txs = txs.filter(t => t.subCat === cat || t.mainCat === cat);
+    if (cat) {
+      const [type, main, sub] = cat.split('|||');
+      txs = txs.filter(t => t.type === type && t.mainCat === main && t.subCat === sub);
+    }
     if (month) txs = txs.filter(t => inMonth(t, month));
     if (reviewedFilter === 'reviewed') txs = txs.filter(t => !!t.reviewed);
     if (reviewedFilter === 'unreviewed') txs = txs.filter(t => !t.reviewed);
@@ -960,6 +979,14 @@ const App = (() => {
       if (!a) return;
       a[el.dataset.field] = el.dataset.field === 'bankBalance' ? Number(el.value) || 0 : el.value;
     });
+    document.querySelectorAll('[data-account-type-index]').forEach(el => {
+      const idx = Number(el.dataset.accountTypeIndex);
+      const oldName = state.accountTypes[idx];
+      const newName = el.value.trim();
+      if (!oldName || !newName) return;
+      state.accountTypes[idx] = newName;
+      state.accounts.forEach(a => { if (a.type === oldName) a.type = newName; });
+    });
     document.querySelectorAll('[data-budget-id]').forEach(el => {
       state.budgets[`${state.dashboardMonth || currentMonth()}|${el.dataset.budgetId}`] = Number(el.value) || 0;
     });
@@ -1108,6 +1135,8 @@ const App = (() => {
     state = loadState();
     if (!$('tx-date').value) $('tx-date').value = today();
     if (!state.dashboardSubCats.length) state.dashboardSubCats = allSubs('Expense').slice(0, 3).map(s => s.id);
+    // Persist any migrated category structure immediately so category IDs/order do not regenerate on refresh.
+    save();
     document.addEventListener('click', handleClick);
     document.addEventListener('change', handleChange);
     document.addEventListener('input', handleInput);
